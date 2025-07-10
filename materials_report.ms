@@ -1,6 +1,7 @@
 -- VRay Map Inspector Script
 -- Shows map information for VRay materials in selected groups
 -- Exports results to a text file
+-- Updated to support VRay Blend Materials
 
 fn getAllObjectsFromGroup grp =
 (
@@ -165,6 +166,208 @@ fn getMaterialMaps mat =
     return mapList
 )
 
+fn processVRayBlendMaterial blendMat uniqueMaterialMaps =
+(
+    print ("Processing VRay Blend Material: " + blendMat.name)
+    
+    -- Debug: Print all properties of the blend material
+    try
+    (
+        local props = getPropNames blendMat
+        print ("Blend Material Properties: " + props as string)
+    )
+    catch()
+    
+    -- Process base material (VRay Blend typically has one base material)
+    try
+    (
+        if hasProperty blendMat "baseMtl" then
+        (
+            local baseMat = blendMat.baseMtl
+            if baseMat != undefined then
+            (
+                print ("Found base material: " + baseMat.name)
+                processMaterial baseMat uniqueMaterialMaps ("Base Material - ")
+            )
+        )
+    )
+    catch (ex)
+    (
+        print ("Error accessing base material: " + ex as string)
+    )
+    
+    -- Process coat materials (VRay Blend can have multiple coat materials)
+    for i = 1 to 9 do  -- VRay Blend supports up to 9 coat materials
+    (
+        try
+        (
+            local coatPropName = "coatMtl_" + (i as string)
+            if hasProperty blendMat coatPropName then
+            (
+                local coatMat = getProperty blendMat coatPropName
+                if coatMat != undefined then
+                (
+                    print ("Found coat material " + i as string + ": " + coatMat.name)
+                    processMaterial coatMat uniqueMaterialMaps ("Coat Material " + i as string + " - ")
+                )
+            )
+        )
+        catch (ex)
+        (
+            print ("Error accessing coat material " + i as string + ": " + ex as string)
+        )
+    )
+    
+    -- Alternative approach: try different naming conventions
+    for i = 1 to 9 do
+    (
+        try
+        (
+            local coatPropName = "coatMtl" + (i as string)
+            if hasProperty blendMat coatPropName then
+            (
+                local coatMat = getProperty blendMat coatPropName
+                if coatMat != undefined then
+                (
+                    print ("Found coat material (alt) " + i as string + ": " + coatMat.name)
+                    processMaterial coatMat uniqueMaterialMaps ("Coat Material " + i as string + " - ")
+                )
+            )
+        )
+        catch()
+    )
+    
+    -- Process blend amounts (these can also have maps)
+    for i = 1 to 9 do
+    (
+        try
+        (
+            local blendPropName = "blendAmount_" + (i as string)
+            if hasProperty blendMat blendPropName then
+            (
+                local blendAmount = getProperty blendMat blendPropName
+                if blendAmount != undefined and isKindOf blendAmount TextureMap then
+                (
+                    local bitmapFiles = findBitmapInMap blendAmount
+                    if bitmapFiles.count > 0 then
+                    (
+                        local materialEntry = blendMat.name + " - Blend Amount " + i as string + ":"
+                        local mapList = #()
+                        
+                        for bitmapFile in bitmapFiles do
+                        (
+                            append mapList ("Blend Amount: " + bitmapFile)
+                        )
+                        
+                        local matFound = false
+                        for entry in uniqueMaterialMaps do
+                        (
+                            if entry[1] == materialEntry then
+                            (
+                                matFound = true
+                                exit
+                            )
+                        )
+                        
+                        if not matFound then
+                            append uniqueMaterialMaps #(materialEntry, mapList)
+                    )
+                )
+            )
+        )
+        catch()
+    )
+    
+    -- Try alternative blend amount naming
+    for i = 1 to 9 do
+    (
+        try
+        (
+            local blendPropName = "blendAmount" + (i as string)
+            if hasProperty blendMat blendPropName then
+            (
+                local blendAmount = getProperty blendMat blendPropName
+                if blendAmount != undefined and isKindOf blendAmount TextureMap then
+                (
+                    local bitmapFiles = findBitmapInMap blendAmount
+                    if bitmapFiles.count > 0 then
+                    (
+                        local materialEntry = blendMat.name + " - Blend Amount " + i as string + ":"
+                        local mapList = #()
+                        
+                        for bitmapFile in bitmapFiles do
+                        (
+                            append mapList ("Blend Amount: " + bitmapFile)
+                        )
+                        
+                        local matFound = false
+                        for entry in uniqueMaterialMaps do
+                        (
+                            if entry[1] == materialEntry then
+                            (
+                                matFound = true
+                                exit
+                            )
+                        )
+                        
+                        if not matFound then
+                            append uniqueMaterialMaps #(materialEntry, mapList)
+                    )
+                )
+            )
+        )
+        catch()
+    )
+)
+
+fn processMaterial mat uniqueMaterialMaps prefix:"" =
+(
+    if mat == undefined then
+        return false
+    
+    if classof mat == VRayMtl then
+    (
+        local mapList = getMaterialMaps mat
+        if mapList.count > 0 then
+        (
+            local materialEntry = prefix + mat.name + ":"
+            
+            -- Check if this material is already processed
+            local matFound = false
+            for entry in uniqueMaterialMaps do
+            (
+                if entry[1] == materialEntry then
+                (
+                    matFound = true
+                    exit
+                )
+            )
+            
+            if not matFound then
+                append uniqueMaterialMaps #(materialEntry, mapList)
+        )
+    )
+    else if classof mat == VRayBlendMtl then
+    (
+        -- Process VRay Blend Material
+        processVRayBlendMaterial mat uniqueMaterialMaps
+    )
+    else if classof mat == Multimaterial then
+    (
+        -- Check sub-materials in multi-material
+        for j = 1 to mat.materialList.count do
+        (
+            local subMat = mat.materialList[j]
+            if subMat != undefined then
+            (
+                processMaterial subMat uniqueMaterialMaps ("SubMat " + j as string + " - ")
+            )
+        )
+    )
+    
+    return true
+)
+
 fn inspectGroupMaps =
 (
     local selectedGroups = getCurrentSelection()
@@ -215,57 +418,7 @@ fn inspectGroupMaps =
         (
             if obj.material != undefined then
             (
-                if classof obj.material == VRayMtl then
-                (
-                    local mapList = getMaterialMaps obj.material
-                    if mapList.count > 0 then
-                    (
-                        local materialEntry = obj.material.name + ":"
-                        
-                        -- Check if this material is already processed
-                        local matFound = false
-                        for entry in uniqueMaterialMaps do
-                        (
-                            if entry[1] == materialEntry then
-                            (
-                                matFound = true
-                                exit
-                            )
-                        )
-                        
-                        if not matFound then
-                            append uniqueMaterialMaps #(materialEntry, mapList)
-                    )
-                )
-                else if classof obj.material == Multimaterial then
-                (
-                    -- Check sub-materials in multi-material
-                    for j = 1 to obj.material.materialList.count do
-                    (
-                        local subMat = obj.material.materialList[j]
-                        if subMat != undefined and classof subMat == VRayMtl then
-                        (
-                            local mapList = getMaterialMaps subMat
-                            if mapList.count > 0 then
-                            (
-                                local materialEntry = subMat.name + ":"
-                                
-                                local matFound = false
-                                for entry in uniqueMaterialMaps do
-                                (
-                                    if entry[1] == materialEntry then
-                                    (
-                                        matFound = true
-                                        exit
-                                    )
-                                )
-                                
-                                if not matFound then
-                                    append uniqueMaterialMaps #(materialEntry, mapList)
-                            )
-                        )
-                    )
-                )
+                processMaterial obj.material uniqueMaterialMaps
             )
         )
         
