@@ -319,11 +319,35 @@ struct MatFileAnalyzerStruct (
             
             VRayBlendMtl: (
                 if mat.baseMtl != undefined then this.analyzeMaterial mat.baseMtl (currentPath + " > Base")
-                for i = 1 to mat.coatMtl.count do (
-                    if mat.coatMtl[i] != undefined then this.analyzeMaterial mat.coatMtl[i] (currentPath + " > Coat" + i as string)
+                
+                -- Safely access coat materials with error handling
+                try (
+                    for i = 1 to mat.coatMtl.count do (
+                        try (
+                            if mat.coatMtl[i] != undefined then (
+                                this.analyzeMaterial mat.coatMtl[i] (currentPath + " > Coat" + i as string)
+                            )
+                        ) catch (
+                            print ("Error accessing coat material " + i as string + ": " + getCurrentException())
+                        )
+                    )
+                ) catch (
+                    print ("Error accessing coat materials: " + getCurrentException())
                 )
-                for i = 1 to mat.blendMtl.count do (
-                    if mat.blendMtl[i] != undefined then this.addMap mat.blendMtl[i] ("Blend" + i as string) mat.name currentPath
+                
+                -- Safely access blend materials with error handling
+                try (
+                    for i = 1 to mat.blendMtl.count do (
+                        try (
+                            if mat.blendMtl[i] != undefined then (
+                                this.addMap mat.blendMtl[i] ("Blend" + i as string) mat.name currentPath
+                            )
+                        ) catch (
+                            print ("Error accessing blend material " + i as string + ": " + getCurrentException())
+                        )
+                    )
+                ) catch (
+                    print ("Error accessing blend materials: " + getCurrentException())
                 )
             )
             
@@ -480,7 +504,7 @@ struct MatFileAnalyzerStruct (
         this.analyzeSubMaps mapObj mapType matName matPath
     ),
     
-    -- Analyze sub-maps (like in Composite or Mix maps)
+    -- Analyze sub-maps (like in Composite or Mix maps) - FIXED VERSION
     fn analyzeSubMaps mapObj mapType matName matPath = (
         case classOf mapObj of (
             CompositeMap: (
@@ -498,14 +522,65 @@ struct MatFileAnalyzerStruct (
             )
             
             VRayDirt: (
-                if mapObj.texmap_unoccluded != undefined then this.addMap mapObj.texmap_unoccluded (mapType + " > Unoccluded") matName matPath
-                if mapObj.texmap_occluded != undefined then this.addMap mapObj.texmap_occluded (mapType + " > Occluded") matName matPath
+                -- Fixed: Use correct property names for VRayDirt
+                try (
+                    if hasProperty mapObj "unoccluded_color" and mapObj.unoccluded_color != undefined then (
+                        this.addMap mapObj.unoccluded_color (mapType + " > Unoccluded") matName matPath
+                    )
+                ) catch (
+                    -- Ignore if property doesn't exist
+                )
+                
+                try (
+                    if hasProperty mapObj "occluded_color" and mapObj.occluded_color != undefined then (
+                        this.addMap mapObj.occluded_color (mapType + " > Occluded") matName matPath
+                    )
+                ) catch (
+                    -- Ignore if property doesn't exist
+                )
+                
+                -- Alternative property names that might exist
+                try (
+                    if hasProperty mapObj "color1" and mapObj.color1 != undefined then (
+                        this.addMap mapObj.color1 (mapType + " > Color1") matName matPath
+                    )
+                ) catch ()
+                
+                try (
+                    if hasProperty mapObj "color2" and mapObj.color2 != undefined then (
+                        this.addMap mapObj.color2 (mapType + " > Color2") matName matPath
+                    )
+                ) catch ()
             )
             
             VRayBlendMtl: (
                 if mapObj.base_material != undefined then this.addMap mapObj.base_material (mapType + " > Base") matName matPath
-                for i = 1 to mapObj.coat_material.count do (
-                    if mapObj.coat_material[i] != undefined then this.addMap mapObj.coat_material[i] (mapType + " > Coat" + i as string) matName matPath
+                try (
+                    for i = 1 to mapObj.coat_material.count do (
+                        if mapObj.coat_material[i] != undefined then this.addMap mapObj.coat_material[i] (mapType + " > Coat" + i as string) matName matPath
+                    )
+                ) catch (
+                    -- Ignore errors accessing coat materials
+                )
+            )
+            
+            -- Add more map types as needed
+            default: (
+                -- Try to analyze unknown map types generically
+                try (
+                    local props = getPropNames mapObj
+                    for prop in props do (
+                        try (
+                            local val = getProperty mapObj prop
+                            if isKindOf val TextureMap then (
+                                this.addMap val (mapType + " > " + prop as string) matName matPath
+                            )
+                        ) catch (
+                            -- Ignore property access errors
+                        )
+                    )
+                ) catch (
+                    -- Ignore generic analysis errors
                 )
             )
         )
